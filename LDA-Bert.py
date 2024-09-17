@@ -1,6 +1,6 @@
 import numpy as np
-import requests
-from bs4 import BeautifulSoup
+import pandas as pd
+import os
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from gensim import corpora
@@ -10,35 +10,25 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
+from html_parser_preprocessor import HTMLParserPreprocessor  # Import our new class
 
-def parse_html(html_content):
-    soup = BeautifulSoup(html_content, 'html.parser')
-    # Extract text from all paragraphs
-    paragraphs = soup.find_all('p')
-    text = ' '.join([p.get_text() for p in paragraphs])
-    return text
+# Define the path to your dataset
+DATASET_PATH = "path/to/your/dataset"
 
-def get_content(source):
-    if source.startswith('http'):
-        # If it's a URL, fetch the content
-        response = requests.get(source)
-        return parse_html(response.text)
-    else:
-        # If it's a file path, read the file
-        with open(source, 'r', encoding='utf-8') as file:
-            return parse_html(file.read())
+# Initialize our HTML parser and preprocessor
+parser = HTMLParserPreprocessor()
 
-# Assuming you have a list of HTML sources (URLs or file paths) and their corresponding labels
-html_sources = [
-    'https://example.com/page1.html',
-    'https://example.com/page2.html',
-    '/path/to/local/file1.html',
-    '/path/to/local/file2.html'
-]
-labels = ['category1', 'category2', 'category1', 'category2']  # Example labels
+# Load metadata
+metadata = pd.read_csv(os.path.join(DATASET_PATH, "articles_metadata.csv"))
 
-# Process HTML sources
-texts = [get_content(source) for source in tqdm(html_sources, desc="Parsing HTML")]
+# Process HTML files
+texts = []
+labels = []
+for _, row in tqdm(metadata.iterrows(), total=len(metadata), desc="Processing HTML files"):
+    file_path = os.path.join(DATASET_PATH, "html_files", f"{row['domain']}_{row['category']}.html")
+    processed_text = parser.parse_and_extract(file_path)
+    texts.append(processed_text)
+    labels.append(row['category'])
 
 # LDA part
 dictionary = corpora.Dictionary([text.split() for text in texts])
@@ -148,3 +138,28 @@ with torch.no_grad():
         correct += (predicted == batch_y).sum().item()
 
 print(f'Final Test Accuracy: {100 * correct / total:.2f}%')
+
+# Save the trained model
+torch.save(model.state_dict(), 'lda_bert_model.pth')
+print("Model saved as lda_bert_model.pth")
+
+# Function to predict category for new articles
+def predict_category(model, html_source):
+    model.eval()
+    with torch.no_grad():
+        # Process the HTML source
+        processed_text = parser.parse_and_extract(html_source)
+        
+        # Extract features
+        features = np.concatenate([get_lda_features(processed_text), get_bert_embedding(processed_text)])
+        features = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(device)
+        
+        # Make prediction
+        output = model(features)
+        _, predicted = torch.max(output.data, 1)
+    return label_encoder.inverse_transform(predicted.cpu().numpy())[0]
+
+# Example usage of the prediction function
+new_article_url = "https://example.com/new_article"
+predicted_category = predict_category(model, new_article_url)
+print(f"Predicted category: {predicted_category}")
