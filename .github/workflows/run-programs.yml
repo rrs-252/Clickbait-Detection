@@ -26,6 +26,7 @@ jobs:
     - name: Download NLTK punkt
       run: |
         python -m nltk.downloader punkt
+        python -m nltk.downloader all
 
     - name: Cache Python dependencies
       uses: actions/cache@v2
