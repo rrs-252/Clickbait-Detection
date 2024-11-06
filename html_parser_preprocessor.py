@@ -6,6 +6,7 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 import string
+from typing import Union, IO
 
 # Download necessary NLTK data
 nltk.download('punkt')
@@ -17,16 +18,30 @@ class HTMLParserPreprocessor:
         self.stop_words = set(stopwords.words('english'))
         self.lemmatizer = WordNetLemmatizer()
 
-    def parse_and_extract(self, source):
-        """Parse HTML from file or URL and extract text content."""
-        if source.startswith('http'):
-            # It's a URL
-            response = requests.get(source)
-            html_content = response.text
+    def parse_and_extract(self, source: Union[str, IO]) -> str:
+        """
+        Parse HTML from file content or URL and extract text content.
+        
+        Args:
+            source: Can be one of:
+                   - URL string starting with 'http'
+                   - File object containing HTML content
+                   - String containing HTML content
+        
+        Returns:
+            Preprocessed text content ready for LDA-BERT processing
+        """
+        if isinstance(source, str):
+            if source.startswith('http'):
+                # It's a URL
+                response = requests.get(source)
+                html_content = response.text
+            else:
+                # It's a raw HTML string
+                html_content = source
         else:
-            # It's a file path
-            with open(source, 'r', encoding='utf-8') as file:
-                html_content = file.read()
+            # It's a file object
+            html_content = source.read()
 
         soup = BeautifulSoup(html_content, 'html.parser')
 
@@ -42,7 +57,7 @@ class HTMLParserPreprocessor:
 
         return self.preprocess(full_text)
 
-    def preprocess(self, text):
+    def preprocess(self, text: str) -> str:
         """Apply all preprocessing steps to the text."""
         text = self.lowercase(text)
         text = self.remove_html_tags(text)
@@ -50,42 +65,29 @@ class HTMLParserPreprocessor:
         tokens = self.tokenize(text)
         tokens = self.remove_stopwords(tokens)
         tokens = self.lemmatize(tokens)
-        return ' '.join(tokens)  # Join tokens back into a string for LDA
+        return ' '.join(tokens)
 
-    def lowercase(self, text):
+    def lowercase(self, text: str) -> str:
         """Convert text to lowercase."""
         return text.lower()
 
-    def remove_html_tags(self, text):
+    def remove_html_tags(self, text: str) -> str:
         """Remove any remaining HTML tags."""
         return re.sub(r'<[^>]+>', '', text)
 
-    def remove_special_characters(self, text):
+    def remove_special_characters(self, text: str) -> str:
         """Remove special characters and numbers."""
         # Keep only letters and spaces
         return re.sub(r'[^a-zA-Z\s]', '', text)
 
-    def tokenize(self, text):
+    def tokenize(self, text: str) -> list:
         """Tokenize the text."""
         return word_tokenize(text)
 
-    def remove_stopwords(self, tokens):
+    def remove_stopwords(self, tokens: list) -> list:
         """Remove stop words."""
         return [token for token in tokens if token not in self.stop_words]
 
-    def lemmatize(self, tokens):
+    def lemmatize(self, tokens: list) -> list:
         """Lemmatize tokens."""
         return [self.lemmatizer.lemmatize(token) for token in tokens]
-
-# Example usage
-parser = HTMLParserPreprocessor()
-
-# Process a URL
-url = "https://example.com/article"
-processed_text_url = parser.parse_and_extract(url)
-print("Processed text from URL:", processed_text_url[:100])  # Print first 100 characters
-
-# Process a local HTML file
-file_path = "path/to/local/file.html"
-processed_text_file = parser.parse_and_extract(file_path)
-print("Processed text from file:", processed_text_file[:100])  # Print first 100 characters
