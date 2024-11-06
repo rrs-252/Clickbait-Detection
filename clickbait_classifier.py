@@ -6,24 +6,16 @@ from gensim.models import LdaMulticore
 import torch
 from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
-from LDA_Bert import TextDataset, get_lda_features
+from LDA_Bert import dictionary, lda_model, get_lda_features  
 
 class ClickbaitClassifier:
-    def __init__(self, lda_model_path=None, dictionary_path=None):
-        # Initialize the HTML parser
+    def __init__(self):
+        # Initialize HTML parser, BERT model, and tokenizer
         self.parser = HTMLParserPreprocessor()
-        
-        # Load pre-trained BERT
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         self.bert_model = BertModel.from_pretrained('bert-base-uncased')
-        
-        # Load LDA model and dictionary
-        self.dictionary = dictionary  # Replace with actual dictionary
-        self.lda_model = lda_model   # Replace with actual LDA model
-        
-        # Set up label encoder
         self.label_encoder = LabelEncoder()
-        self.label_encoder.classes_ = ['clickbait', 'not clickbait']
+        self.label_encoder.classes_ = ['clickbait', 'not clickbait']  # Ensure these match your training labels
 
     def predict_clickbait(self, html_content):
         """
