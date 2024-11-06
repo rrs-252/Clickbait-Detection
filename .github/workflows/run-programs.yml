@@ -2,9 +2,9 @@ name: Run Programs in Sequence
 
 on:
   push:
-    branches: [main]
+    branches: [ "main" ]
   pull_request:
-    branches: [main]
+    branches: [ "main" ]
 
 jobs:
 
@@ -13,6 +13,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install bs4 requests nltk gensim transformers scikit-learn
 
     - name: Run HTML Parser Preprocessor
       run: python html_parser_preprocessor.py
