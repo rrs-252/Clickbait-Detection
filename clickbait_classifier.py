@@ -59,8 +59,7 @@ class ClickbaitClassifier:
 
         # Load a pre-trained classifier model here and predict with `combined_features`
         # Example: classifier_output = classifier_model(combined_features)
-        # predicted_label = torch.argmax(classifier_output).item()
-        predicted_label = 0  # Replace this with the actual predicted label
+        predicted_label = 0  # Replace this with the actual predicted label (an integer)
 
         # Step 5: Decode label and output result
         prediction_label = self.label_encoder.inverse_transform([predicted_label])[0]
