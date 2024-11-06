@@ -6,7 +6,7 @@ from gensim.models import LdaMulticore
 import torch
 from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
-from Modified_LDA_Bert import TextDataset, get_lda_features
+from LDA_Bert import TextDataset, get_lda_features
 
 # Initialize the HTML parser
 parser = HTMLParserPreprocessor()
