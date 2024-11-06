@@ -80,3 +80,7 @@ train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 
 # Model, training loop, etc. can follow here
+# Export dictionary and lda_model for use in other scripts
+__all__ = ['dictionary', 'lda_model', 'TextDataset', 'get_lda_features']
+
+# Any standalone execution code, such as model training or evaluation, can follow here if present.
