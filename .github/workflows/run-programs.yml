@@ -1,5 +1,4 @@
 name: Run Programs in Sequence
-
 on:
   push:
     branches: [ "main" ]
@@ -9,25 +8,22 @@ on:
 jobs:
   run-programs:
     runs-on: ubuntu-latest
-
+    env:
+      USER_INPUT: https://www.ndtv.com/india-news/renowned-folk-singer-sharda-sinha-dies-during-treatment-at-aiims-delhi-6951734
     steps:
     - uses: actions/checkout@v2
-
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
         python-version: 3.9
-
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install bs4 requests nltk gensim transformers scikit-learn numpy pandas torch
-
     - name: Download NLTK punkt
       run: |
         python -m nltk.downloader punkt
         python -m nltk.downloader all
-
     - name: Cache Python dependencies
       uses: actions/cache@v2
       with:
@@ -35,12 +31,9 @@ jobs:
         key: ${{ runner.os }}-poetry-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-poetry-
-
     - name: Run HTML Parser Preprocessor
       run: python html_parser_preprocessor.py
-
     - name: Run LDA-Bert
       run: python LDA_Bert.py
-
     - name: Run Clickbait Classifier
-      run: python clickbait_classifier.py
+      run: python clickbait_classifier.py ${{ env.USER_INPUT }}
