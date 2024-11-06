@@ -62,8 +62,10 @@ class ClickbaitClassifier:
         predicted_label = 0  # Replace this with the actual predicted label (an integer)
 
         # Step 5: Decode label and output result
-        prediction_label = self.label_encoder.inverse_transform([predicted_label])[0]
-        return prediction_label
+        if predicted_label == 0:
+            return "not clickbait"
+        else:
+            return "clickbait"
 
 def main():
     # Initialize the classifier
