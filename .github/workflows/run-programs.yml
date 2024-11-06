@@ -1,0 +1,24 @@
+name: Run Programs in Sequence
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  run-programs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Run HTML Parser Preprocessor
+      run: python html_parser_preprocessor.py
+
+    - name: Run LDA-Bert
+      run: python LDA_Bert.py
+
+    - name: Run Clickbait Classifier
+      run: python clickbait_classifier.py
