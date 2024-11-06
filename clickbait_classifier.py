@@ -8,54 +8,91 @@ from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
 from LDA_Bert import TextDataset, get_lda_features
 
-# Initialize the HTML parser
-parser = HTMLParserPreprocessor()
+class ClickbaitClassifier:
+    def __init__(self, lda_model_path=None, dictionary_path=None):
+        # Initialize the HTML parser
+        self.parser = HTMLParserPreprocessor()
+        
+        # Load pre-trained BERT
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.bert_model = BertModel.from_pretrained('bert-base-uncased')
+        
+        # Load LDA model and dictionary
+        self.dictionary = dictionary  # Replace with actual dictionary
+        self.lda_model = lda_model   # Replace with actual LDA model
+        
+        # Set up label encoder
+        self.label_encoder = LabelEncoder()
+        self.label_encoder.classes_ = ['clickbait', 'not clickbait']
 
-# Load pre-trained BERT and LDA models
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-bert_model = BertModel.from_pretrained('bert-base-uncased')
+    def predict_clickbait(self, html_content):
+        """
+        Predict whether content is clickbait or not.
+        
+        Args:
+            html_content: Can be one of:
+                       - URL string starting with 'http'
+                       - File object containing HTML content
+                       - String containing HTML content
+        
+        Returns:
+            str: 'clickbait' or 'not clickbait'
+        """
+        # Step 1: Parse HTML content using the updated parser
+        try:
+            processed_text = self.parser.parse_and_extract(html_content)
+        except Exception as e:
+            raise ValueError(f"Error processing HTML content: {str(e)}")
+        
+        # Step 2: Get LDA and BERT features
+        lda_features = get_lda_features(processed_text)
+        bert_tokens = self.tokenizer(processed_text, 
+                                   padding='max_length', 
+                                   truncation=True, 
+                                   return_tensors="pt")
 
-# Placeholder for loading LDA model (assuming it's saved or loaded with same dictionary from training)
-dictionary = None  # Replace with the actual dictionary loaded from your LDA training
-lda_model = None   # Replace with your actual LDA model (assuming saved and reloaded here)
+        # Step 3: Get BERT embeddings
+        with torch.no_grad():
+            bert_output = self.bert_model(
+                input_ids=bert_tokens['input_ids'],
+                attention_mask=bert_tokens['attention_mask']
+            )
+            bert_embedding = bert_output.last_hidden_state.mean(dim=1)
 
-# Set up label encoder
-label_encoder = LabelEncoder()
-label_encoder.classes_ = ['clickbait', 'not clickbait']  # Ensure these match your training labels
+        # Step 4: Combine LDA and BERT features
+        combined_features = torch.cat(
+            (torch.tensor(lda_features), bert_embedding.squeeze()), 
+            dim=0
+        )
+        
+        # Load a pre-trained classifier model here and predict with `combined_features`
+        # Example: classifier_output = classifier_model(combined_features)
+        # predicted_label = torch.argmax(classifier_output).item()
+        
+        # Step 5: Decode label and output result
+        prediction_label = self.label_encoder.inverse_transform([predicted_label])[0]
+        return prediction_label
 
-# Prediction Function
-def predict_clickbait(html_content):
-    # Step 1: Parse HTML content
-    processed_text = parser.parse_and_extract(html_content)
-    
-    # Step 2: Get LDA and BERT features
-    lda_features = get_lda_features(processed_text)
-    bert_tokens = tokenizer(processed_text, padding='max_length', truncation=True, return_tensors="pt")
-
-    # Step 3: Get BERT embeddings
-    with torch.no_grad():
-        bert_output = bert_model(input_ids=bert_tokens['input_ids'], attention_mask=bert_tokens['attention_mask'])
-        bert_embedding = bert_output.last_hidden_state.mean(dim=1)  # Pool the BERT output
-
-    # Step 4: Combine LDA and BERT features (Example: simple concatenation)
-    combined_features = torch.cat((torch.tensor(lda_features), bert_embedding.squeeze()), dim=0)
-    
-    # Load a pre-trained classifier model here and predict with `combined_features`
-    # Example: classifier_output = classifier_model(combined_features)
-    # predicted_label = torch.argmax(classifier_output).item()
-    
-    # Step 5: Decode label and output result
-    prediction_label = label_encoder.inverse_transform([predicted_label])[0]  # Assuming binary classification
-    return prediction_label
-
-# Main Function
 def main():
-    # Specify HTML file or URL
-    html_content = "path/to/html_file.html"  # Update this to a file path or load HTML from URL
+    # Initialize the classifier
+    classifier = ClickbaitClassifier()
     
-    # Predict if the content is clickbait or not
-    result = predict_clickbait(html_content)
-    print(f"The article is predicted as: {result}")
+    # Example usage with different input types:
+    
+    # 1. From URL
+    url = "https://example.com/article"
+    result_url = classifier.predict_clickbait(url)
+    print(f"URL article classification: {result_url}")
+    
+    # 2. From file object
+    with open('article.html', 'r', encoding='utf-8') as file:
+        result_file = classifier.predict_clickbait(file)
+    print(f"File article classification: {result_file}")
+    
+    # 3. From HTML string
+    html_string = "<html><body><h1>Article Title</h1><p>Article content...</p></body></html>"
+    result_string = classifier.predict_clickbait(html_string)
+    print(f"HTML string classification: {result_string}")
 
 if __name__ == "__main__":
     main()
