@@ -71,22 +71,24 @@ def main():
     # Initialize the classifier
     classifier = ClickbaitClassifier()
 
-    # Example usage with different input types:
+    # Get user input
+    while True:
+        user_input = input("Enter a website URL, HTML file path, or HTML content (type 'quit' to exit): ")
+        if user_input.lower() == 'quit':
+            break
 
-    # 1. From URL
-    url = "https://example.com/article"
-    result_url = classifier.predict_clickbait(url)
-    print(f"URL article classification: {result_url}")
-
-    # 2. From file object
-    with open('article.html', 'r', encoding='utf-8') as file:
-        result_file = classifier.predict_clickbait(file)
-    print(f"File article classification: {result_file}")
-
-    # 3. From HTML string
-    html_string = "<html><body><h1>Article Title</h1><p>Article content...</p></body></html>"
-    result_string = classifier.predict_clickbait(html_string)
-    print(f"HTML string classification: {result_string}")
+        if user_input.startswith('http'):
+            result = classifier.predict_clickbait(user_input)
+            print(f"URL article classification: {result}")
+            
+        elif os.path.isfile(user_input):
+            with open(user_input, 'r', encoding='utf-8') as file:
+                result = classifier.predict_clickbait(file)
+            print(f"File article classification: {result}")
+            
+        else:
+            result = classifier.predict_clickbait(user_input)
+            print(f"HTML string classification: {result}")
 
 if __name__ == "__main__":
     main()
