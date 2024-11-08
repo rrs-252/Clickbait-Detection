@@ -83,7 +83,53 @@ test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 # Export dictionary and lda_model for use in other scripts
 __all__ = ['dictionary', 'lda_model', 'TextDataset', 'get_lda_features']
 
-# Any standalone execution code, such as model training or evaluation, can follow here if present.
+# Define the LDA-BERT model
+class LDABertClassifier(nn.Module):
+    def __init__(self, bert_model, num_lda_features):
+        super().__init__()
+        self.bert_model = bert_model
+        self.num_lda_features = num_lda_features
+        self.classifier = nn.Linear(bert_model.config.hidden_size + num_lda_features, 2)  # 2 classes (clickbait, not clickbait)
+
+    def forward(self, input_ids, attention_mask, lda_features):
+        bert_output = self.bert_model(input_ids, attention_mask=attention_mask)[1]  # pooled output
+        combined_features = torch.cat((bert_output, lda_features), dim=1)
+        logits = self.classifier(combined_features)
+        return logits
+
+# Training hyperparameters
+num_epochs = 10
+learning_rate = 1e-5
+batch_size = 8
+
+# Initialize the model
+lda_bert_model = LDABertClassifier(bert_model, len(lda_features[0]))
+
+# Loss function and optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(lda_bert_model.parameters(), lr=learning_rate)
+
+# Training loop
+for epoch in range(num_epochs):
+    lda_bert_model.train()
+    train_loss = 0.0
+    for batch in train_loader:
+        optimizer.zero_grad()
+        input_ids = batch['input_ids']
+        attention_mask = batch['attention_mask']
+        lda_features = batch['lda_features']
+        labels = batch['label']
+        outputs = lda_bert_model(input_ids, attention_mask, lda_features)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item()
+    print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss/len(train_loader):.4f}")
+
+# Evaluation
+test_dataset = TextDataset(test_texts, test_labels)
+test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
+
 lda_bert_model.eval()
 y_true = []
 y_pred = []
@@ -93,10 +139,8 @@ with torch.no_grad():
         attention_mask = batch['attention_mask']
         lda_features = batch['lda_features']
         labels = batch['label']
-
         outputs = lda_bert_model(input_ids, attention_mask, lda_features)
         _, predicted = torch.max(outputs, 1)
-
         y_true.extend(labels.tolist())
         y_pred.extend(predicted.tolist())
 
