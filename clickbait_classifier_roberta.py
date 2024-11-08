@@ -3,9 +3,10 @@ import os
 from transformers import RobertaTokenizer, RobertaModel
 from gensim import corpora
 from gensim.models import LdaMulticore
+import torch
 from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
-from LDA_RoBERTa import dictionary, lda_model, get_lda_features, TextDataset
+from LDA_RoBERTa import LdaRobertaClassifier, dictionary, lda_model
 
 class ClickbaitClassifier:
     def __init__(self):
@@ -15,6 +16,7 @@ class ClickbaitClassifier:
         self.roberta_model = RobertaModel.from_pretrained('roberta-base')
         self.label_encoder = LabelEncoder()
         self.label_encoder.classes_ = ['clickbait', 'not clickbait']  # Ensure these match your training labels
+        self.lda_roberta_model = LdaRobertaClassifier()
 
     def predict_clickbait(self, html_content):
         """
@@ -38,26 +40,28 @@ class ClickbaitClassifier:
         # Step 2: Get LDA and RoBERTa features
         lda_features = get_lda_features(processed_text)
         roberta_tokens = self.tokenizer(processed_text,
-                                       padding='max_length',
-                                       truncation=True,
-                                       return_tensors="pt")
+                                   padding='max_length',
+                                   truncation=True,
+                                   return_tensors="pt")
 
         # Step 3: Get RoBERTa embeddings
         with torch.no_grad():
-            roberta_output = self.roberta_model(**roberta_tokens)
-            roberta_embedding = roberta_output.pooler_output.squeeze()
+            roberta_output = self.roberta_model(
+                input_ids=roberta_tokens['input_ids'],
+                attention_mask=roberta_tokens['attention_mask']
+            )
+            roberta_embedding = roberta_output.last_hidden_state.mean(dim=1)
 
         # Step 4: Combine LDA and RoBERTa features
         combined_features = torch.cat(
-            (torch.tensor(lda_features), roberta_embedding),
+            (torch.tensor(lda_features), roberta_embedding.squeeze()),
             dim=0
         )
 
-        # Load a pre-trained classifier model here and predict with `combined_features`
-        # Example: classifier_output = classifier_model(combined_features)
-        predicted_label = 0  # Replace this with the actual predicted label (an integer)
+        # Step 5: Use the pre-trained LDA-RoBERTa model to predict
+        predicted_label = self.lda_roberta_model.predict(combined_features)
 
-        # Step 5: Decode label and output result
+        # Step 6: Decode label and output result
         if predicted_label == 0:
             return "not clickbait"
         else:
@@ -76,10 +80,12 @@ def main():
         if user_input.startswith('http'):
             result = classifier.predict_clickbait(user_input)
             print(f"URL article classification: {result}")
+            
         elif os.path.isfile(user_input):
             with open(user_input, 'r', encoding='utf-8') as file:
                 result = classifier.predict_clickbait(file)
             print(f"File article classification: {result}")
+            
         else:
             result = classifier.predict_clickbait(user_input)
             print(f"HTML string classification: {result}")
