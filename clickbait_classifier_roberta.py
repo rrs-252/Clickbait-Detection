@@ -5,7 +5,7 @@ from gensim import corpora
 from gensim.models import LdaMulticore
 from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
-from lda_roberta_model import dictionary, lda_model, get_lda_features, TextDataset
+from LDA_RoBERTa import dictionary, lda_model, get_lda_features, TextDataset
 
 class ClickbaitClassifier:
     def __init__(self):
