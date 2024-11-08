@@ -6,7 +6,7 @@ from gensim.models import LdaMulticore
 import torch
 from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
-from LDA_Bert import dictionary, lda_model, get_lda_features
+from LDA_Bert import LdaBertClassifier, dictionary, lda_model
 
 class ClickbaitClassifier:
     def __init__(self):
@@ -16,6 +16,7 @@ class ClickbaitClassifier:
         self.bert_model = BertModel.from_pretrained('bert-base-uncased')
         self.label_encoder = LabelEncoder()
         self.label_encoder.classes_ = ['clickbait', 'not clickbait']  # Ensure these match your training labels
+        self.lda_bert_model = LdaBertClassifier()
 
     def predict_clickbait(self, html_content):
         """
@@ -57,11 +58,10 @@ class ClickbaitClassifier:
             dim=0
         )
 
-        # Load a pre-trained classifier model here and predict with `combined_features`
-        # Example: classifier_output = classifier_model(combined_features)
-        predicted_label = 0  # Replace this with the actual predicted label (an integer)
+        # Step 5: Use the pre-trained LDA-BERT model to predict
+        predicted_label = self.lda_bert_model.predict(combined_features)
 
-        # Step 5: Decode label and output result
+        # Step 6: Decode label and output result
         if predicted_label == 0:
             return "not clickbait"
         else:
