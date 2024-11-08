@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -10,6 +9,7 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 # Paths to the datasets
 CLICKBAIT_PATH = "articlesClickbait.txt"
@@ -84,3 +84,37 @@ test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 __all__ = ['dictionary', 'lda_model', 'TextDataset', 'get_lda_features']
 
 # Any standalone execution code, such as model training or evaluation, can follow here if present.
+lda_bert_model.eval()
+y_true = []
+y_pred = []
+with torch.no_grad():
+    for batch in test_loader:
+        input_ids = batch['input_ids']
+        attention_mask = batch['attention_mask']
+        lda_features = batch['lda_features']
+        labels = batch['label']
+
+        outputs = lda_bert_model(input_ids, attention_mask, lda_features)
+        _, predicted = torch.max(outputs, 1)
+
+        y_true.extend(labels.tolist())
+        y_pred.extend(predicted.tolist())
+
+lda_bert_accuracy = accuracy_score(y_true, y_pred)
+lda_bert_precision = precision_score(y_true, y_pred, average='weighted')
+lda_bert_recall = recall_score(y_true, y_pred, average='weighted')
+lda_bert_f1 = f1_score(y_true, y_pred, average='weighted')
+
+print("LDA-BERT Model Performance:")
+print(f"Accuracy: {lda_bert_accuracy:.4f}")
+print(f"Precision: {lda_bert_precision:.4f}")
+print(f"Recall: {lda_bert_recall:.4f}")
+print(f"F1-Score: {lda_bert_f1:.4f}")
+
+# Output verification
+if lda_bert_accuracy > 0.8 and lda_bert_f1 > 0.8:
+    print("Model training successful!")
+else:
+    print("Model training unsuccessful. Please check the model and data.")
+    print("Accuracy:", lda_bert_accuracy)
+    print("F1-Score:", lda_bert_f1)
