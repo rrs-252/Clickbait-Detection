@@ -13,6 +13,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import json
 
 # Memory management functions
 def clear_memory():
