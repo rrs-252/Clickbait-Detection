@@ -42,11 +42,17 @@ train_texts, test_texts, train_labels, test_labels = train_test_split(
 # LDA part
 dictionary = corpora.Dictionary([text.split() for text in train_texts])
 corpus = [dictionary.doc2bow(text.split()) for text in train_texts]
-lda_model = LdaMulticore(corpus=corpus, id2word=dictionary, num_topics=10, workers=2)
+num_topics = 10  # Define number of topics
+lda_model = LdaMulticore(corpus=corpus, id2word=dictionary, num_topics=num_topics, workers=2)
 
 def get_lda_features(text):
     bow = dictionary.doc2bow(text.split())
-    return [topic_prob for topic, topic_prob in lda_model.get_document_topics(bow)]
+    # Initialize a zero vector for all topics
+    topic_probs = [0] * num_topics
+    # Fill in the probabilities for the topics that appear
+    for topic, prob in lda_model.get_document_topics(bow):
+        topic_probs[topic] = prob
+    return topic_probs
 
 # BERT part
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -79,31 +85,27 @@ test_dataset = TextDataset(test_texts, test_labels)
 train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 
-# Model, training loop, etc. can follow here
-# Export dictionary and lda_model for use in other scripts
-__all__ = ['dictionary', 'lda_model', 'TextDataset', 'get_lda_features']
-
 # Define the LDA-BERT model
 class LDABertClassifier(nn.Module):
     def __init__(self, bert_model, num_lda_features):
         super().__init__()
         self.bert_model = bert_model
         self.num_lda_features = num_lda_features
-        self.classifier = nn.Linear(bert_model.config.hidden_size + num_lda_features, 2)  # 2 classes (clickbait, not clickbait)
+        self.classifier = nn.Linear(bert_model.config.hidden_size + num_lda_features, 2)
 
     def forward(self, input_ids, attention_mask, lda_features):
-        bert_output = self.bert_model(input_ids, attention_mask=attention_mask)[1]  # pooled output
+        bert_output = self.bert_model(input_ids, attention_mask=attention_mask)[1]
         combined_features = torch.cat((bert_output, lda_features), dim=1)
         logits = self.classifier(combined_features)
         return logits
+
+# Initialize the model with correct number of LDA features
+lda_bert_model = LDABertClassifier(bert_model, num_topics)  # Using num_topics instead of undefined lda_features
 
 # Training hyperparameters
 num_epochs = 10
 learning_rate = 1e-5
 batch_size = 8
-
-# Initialize the model
-lda_bert_model = LDABertClassifier(bert_model, len(lda_features[0]))
 
 # Loss function and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -127,9 +129,6 @@ for epoch in range(num_epochs):
     print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss/len(train_loader):.4f}")
 
 # Evaluation
-test_dataset = TextDataset(test_texts, test_labels)
-test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
-
 lda_bert_model.eval()
 y_true = []
 y_pred = []
