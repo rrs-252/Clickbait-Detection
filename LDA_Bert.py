@@ -238,3 +238,81 @@ if metrics['accuracy'] > 0.8 and metrics['f1'] > 0.8:
     print("Model training successful!")
 else:
     print("Model training needs improvement.")
+
+# Create a directory for the model if it doesn't exist
+os.makedirs('saved_model', exist_ok=True)
+
+# Save the complete model
+model_save_path = 'saved_model/lda_bert_model'
+config_save_path = 'saved_model/model_config.json'
+
+# Save the model state and architecture
+torch.save({
+    'model_state_dict': lda_bert_model.state_dict(),
+    'model_config': {
+        'bert_model_name': 'bert-base-uncased',
+        'num_lda_topics': num_topics,
+        'max_length': train_dataset.max_length
+    }
+}, f'{model_save_path}.pt')
+
+# Save the LDA model
+lda_model.save(f'{model_save_path}_lda.model')
+
+# Save the dictionary
+dictionary.save(f'{model_save_path}_dictionary.dict')
+
+# Save the label encoder
+with open(f'{model_save_path}_label_encoder.npy', 'wb') as f:
+    np.save(f, label_encoder.classes_)
+
+# Save additional configuration and metadata
+config = {
+    'model_performance': metrics,
+    'training_params': {
+        'batch_size': batch_size,
+        'learning_rate': learning_rate,
+        'num_epochs': num_epochs,
+        'accumulation_steps': accumulation_steps
+    },
+    'tokenizer_name': 'bert-base-uncased',
+    'max_length': train_dataset.max_length,
+    'num_lda_topics': num_topics
+}
+
+with open(config_save_path, 'w') as f:
+    json.dump(config, f, indent=4)
+
+print("\nModel saved successfully!")
+print(f"Model files saved in: {os.path.abspath('saved_model')}")
+
+# Function to load the saved model (for future use)
+def load_saved_model(model_dir='saved_model'):
+    # Load configuration
+    with open(f'{model_dir}/model_config.json', 'r') as f:
+        config = json.load(f)
+    
+    # Initialize tokenizer
+    tokenizer = BertTokenizer.from_pretrained(config['tokenizer_name'])
+    
+    # Load BERT and initialize combined model
+    bert_model = BertModel.from_pretrained(config['tokenizer_name'])
+    model = LDABertClassifier(bert_model, config['num_lda_topics'])
+    
+    # Load model state
+    checkpoint = torch.load(f'{model_dir}/lda_bert_model.pt')
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Load LDA model
+    lda_model = LdaMulticore.load(f'{model_dir}/lda_bert_model_lda.model')
+    
+    # Load dictionary
+    dictionary = corpora.Dictionary.load(f'{model_dir}/lda_bert_model_dictionary.dict')
+    
+    # Load label encoder classes
+    label_encoder = LabelEncoder()
+    label_encoder.classes_ = np.load(f'{model_dir}/lda_bert_model_label_encoder.npy', allow_pickle=True)
+    
+    return model, tokenizer, lda_model, dictionary, label_encoder, config
+
+print("\nTo load the saved model later, use the load_saved_model() function.")
