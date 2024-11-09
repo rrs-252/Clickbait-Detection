@@ -266,3 +266,139 @@ if metrics['accuracy'] > 0.8 and metrics['f1'] > 0.8:
     print("Model training successful!")
 else:
     print("Model training needs improvement.")
+
+# Create a directory for the model if it doesn't exist
+os.makedirs('saved_model_roberta', exist_ok=True)
+
+# Save the complete model
+model_save_path = 'saved_model_roberta/lda_roberta_model'
+config_save_path = 'saved_model_roberta/model_config.json'
+
+# Save the model state and architecture
+torch.save({
+    'model_state_dict': lda_roberta_model.state_dict(),
+    'optimizer_state_dict': optimizer.state_dict(),
+    'scheduler_state_dict': scheduler.state_dict(),
+    'model_config': {
+        'roberta_model_name': 'roberta-base',
+        'num_lda_topics': num_topics,
+        'max_length': train_dataset.max_length,
+        'dropout_rate': 0.1  # Save dropout rate used in the model
+    }
+}, f'{model_save_path}.pt')
+
+# Save the LDA model
+lda_model.save(f'{model_save_path}_lda.model')
+
+# Save the dictionary
+dictionary.save(f'{model_save_path}_dictionary.dict')
+
+# Save the label encoder
+with open(f'{model_save_path}_label_encoder.npy', 'wb') as f:
+    np.save(f, label_encoder.classes_)
+
+# Save additional configuration and metadata
+config = {
+    'model_performance': metrics,
+    'training_params': {
+        'batch_size': batch_size,
+        'initial_learning_rate': learning_rate,
+        'num_epochs': num_epochs,
+        'accumulation_steps': accumulation_steps,
+        'max_grad_norm': 1.0,  # Save gradient clipping value
+    },
+    'tokenizer_name': 'roberta-base',
+    'max_length': train_dataset.max_length,
+    'num_lda_topics': num_topics,
+    'model_architecture': {
+        'base_model': 'roberta-base',
+        'dropout_rate': 0.1,
+        'hidden_size': roberta_model.config.hidden_size,
+    }
+}
+
+with open(config_save_path, 'w') as f:
+    json.dump(config, f, indent=4)
+
+print("\nModel saved successfully!")
+print(f"Model files saved in: {os.path.abspath('saved_model_roberta')}")
+
+# Function to load the saved model (for future use)
+def load_saved_model(model_dir='saved_model_roberta', device='cuda' if torch.cuda.is_available() else 'cpu'):
+    # Load configuration
+    with open(f'{model_dir}/model_config.json', 'r') as f:
+        config = json.load(f)
+    
+    # Initialize tokenizer
+    tokenizer = RobertaTokenizer.from_pretrained(config['tokenizer_name'])
+    
+    # Load RoBERTa and initialize combined model
+    roberta_model = RobertaModel.from_pretrained(config['model_architecture']['base_model'])
+    model = LDARoBERTaClassifier(
+        roberta_model, 
+        config['num_lda_topics']
+    ).to(device)
+    
+    # Load model state
+    checkpoint = torch.load(f'{model_dir}/lda_roberta_model.pt', map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Load LDA model
+    lda_model = LdaMulticore.load(f'{model_dir}/lda_roberta_model_lda.model')
+    
+    # Load dictionary
+    dictionary = corpora.Dictionary.load(f'{model_dir}/lda_roberta_model_dictionary.dict')
+    
+    # Load label encoder classes
+    label_encoder = LabelEncoder()
+    label_encoder.classes_ = np.load(f'{model_dir}/lda_roberta_model_label_encoder.npy', allow_pickle=True)
+    
+    # Create a class to handle predictions
+    class ModelPredictor:
+        def __init__(self, model, tokenizer, lda_model, dictionary, label_encoder, device, max_length=256):
+            self.model = model
+            self.tokenizer = tokenizer
+            self.lda_model = lda_model
+            self.dictionary = dictionary
+            self.label_encoder = label_encoder
+            self.device = device
+            self.max_length = max_length
+        
+        def predict(self, text):
+            self.model.eval()
+            with torch.no_grad():
+                # Get LDA features
+                bow = self.dictionary.doc2bow(text.split())
+                topic_probs = [0] * config['num_lda_topics']
+                for topic, prob in self.lda_model.get_document_topics(bow):
+                    topic_probs[topic] = prob
+                
+                # Get RoBERTa features
+                tokens = self.tokenizer(
+                    text,
+                    padding='max_length',
+                    truncation=True,
+                    max_length=self.max_length,
+                    return_tensors="pt"
+                )
+                
+                input_ids = tokens['input_ids'].to(self.device)
+                attention_mask = tokens['attention_mask'].to(self.device)
+                lda_features = torch.tensor([topic_probs], dtype=torch.float).to(self.device)
+                
+                outputs = self.model(input_ids, attention_mask, lda_features)
+                _, predicted = torch.max(outputs, 1)
+                
+                return {
+                    'label': self.label_encoder.inverse_transform(predicted.cpu().numpy())[0],
+                    'probabilities': torch.softmax(outputs, dim=1).cpu().numpy()[0]
+                }
+    
+    # Create predictor instance
+    predictor = ModelPredictor(model, tokenizer, lda_model, dictionary, label_encoder, device)
+    
+    return predictor, config
+
+print("\nTo load the saved model and make predictions, use:")
+print("predictor, config = load_saved_model()")
+print("result = predictor.predict('Your text here')")
