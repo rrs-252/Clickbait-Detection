@@ -47,8 +47,8 @@ def load_data_in_chunks(file_path, label, chunk_size=1000):
     return texts, labels
     
 # Paths to the datasets
-CLICKBAIT_PATH = "articlesClickbait.txt"
-NOT_CLICKBAIT_PATH = "articlesNotClickbait.txt"
+CLICKBAIT_PATH = "train_data/train_Clickbait.txt"
+NOT_CLICKBAIT_PATH = "train_data/train_NotClickbait.txt"
 
 # Load data with chunking
 texts = []
