@@ -1,94 +1,85 @@
+import sys
 import torch
-import os
-from transformers import RobertaTokenizer, RobertaModel
-from gensim import corpora
-from gensim.models import LdaMulticore
-import torch
-from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
-from LDA_RoBERTa import LdaRobertaClassifier, dictionary, lda_model
+from LDA_RoBERTa import load_saved_model
+import torch.nn.functional as F
 
-class ClickbaitClassifier:
-    def __init__(self):
-        # Initialize HTML parser, RoBERTa model, and tokenizer
-        self.parser = HTMLParserPreprocessor()
-        self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-        self.roberta_model = RobertaModel.from_pretrained('roberta-base')
-        self.label_encoder = LabelEncoder()
-        self.label_encoder.classes_ = ['clickbait', 'not clickbait']  # Ensure these match your training labels
-        self.lda_roberta_model = LdaRobertaClassifier()
+class ClickbaitClassifierRoBERTa:
+    def __init__(self, model_dir='saved_model_roberta'):
+        self.html_parser = HTMLParserPreprocessor()
+        print("Loading the model...")
+        self.predictor, self.config = load_saved_model(model_dir)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print("Model loaded successfully!")
 
-    def predict_clickbait(self, html_content):
-        """
-        Predict whether content is clickbait or not.
-
-        Args:
-            html_content: Can be one of:
-                       - URL string starting with 'http'
-                       - File object containing HTML content
-                       - String containing HTML content
-
-        Returns:
-            str: 'clickbait' or 'not clickbait'
-        """
-        # Step 1: Parse HTML content using the updated parser
+    def process_input(self, input_text):
         try:
-            processed_text = self.parser.parse_and_extract(html_content)
+            return self.html_parser.parse_and_extract(input_text)
         except Exception as e:
-            raise ValueError(f"Error processing HTML content: {str(e)}")
+            print(f"Error processing input: {str(e)}")
+            return None
 
-        # Step 2: Get LDA and RoBERTa features
-        lda_features = get_lda_features(processed_text)
-        roberta_tokens = self.tokenizer(processed_text,
-                                   padding='max_length',
-                                   truncation=True,
-                                   return_tensors="pt")
+    def classify(self, processed_text):
+        try:
+            result = self.predictor.predict(processed_text)
+            probabilities = result['probabilities']
+            confidence = max(probabilities) * 100
+            
+            return {
+                'classification': result['label'],
+                'confidence': confidence
+            }
 
-        # Step 3: Get RoBERTa embeddings
-        with torch.no_grad():
-            roberta_output = self.roberta_model(
-                input_ids=roberta_tokens['input_ids'],
-                attention_mask=roberta_tokens['attention_mask']
-            )
-            roberta_embedding = roberta_output.last_hidden_state.mean(dim=1)
+        except Exception as e:
+            print(f"Error during classification: {str(e)}")
+            return None
 
-        # Step 4: Combine LDA and RoBERTa features
-        combined_features = torch.cat(
-            (torch.tensor(lda_features), roberta_embedding.squeeze()),
-            dim=0
-        )
+    def run_interactive(self):
+        print("\nClickbait Classifier")
+        print("-" * 20)
+        print("Enter a URL or paste HTML content (type 'quit' to exit)")
+        
+        while True:
+            try:
+                user_input = input("\nEnter URL or HTML content: ").strip()
+                
+                if user_input.lower() == 'quit':
+                    break
+                
+                if not user_input:
+                    print("Please provide valid input!")
+                    continue
 
-        # Step 5: Use the pre-trained LDA-RoBERTa model to predict
-        predicted_label = self.lda_roberta_model.predict(combined_features)
-
-        # Step 6: Decode label and output result
-        if predicted_label == 0:
-            return "not clickbait"
-        else:
-            return "clickbait"
+                processed_text = self.process_input(user_input)
+                
+                if processed_text:
+                    result = self.classify(processed_text)
+                    if result:
+                        print("\nResults:")
+                        print("-" * 8)
+                        print(f"Classification: {result['classification'].upper()}")
+                        print(f"Confidence: {result['confidence']:.2f}%")
+                    else:
+                        print("Classification failed. Please try again.")
+                else:
+                    print("Failed to process input. Please check your URL or HTML content.")
+                    
+            except KeyboardInterrupt:
+                print("\nOperation cancelled by user.")
+                break
+            except Exception as e:
+                print(f"Unexpected error: {str(e)}")
+                print("Please try again.")
 
 def main():
-    # Initialize the classifier
-    classifier = ClickbaitClassifier()
-
-    # Get user input
-    while True:
-        user_input = input("Enter a website URL, HTML file path, or HTML content (type 'quit' to exit): ")
-        if user_input.lower() == 'quit':
-            break
-
-        if user_input.startswith('http'):
-            result = classifier.predict_clickbait(user_input)
-            print(f"URL article classification: {result}")
-            
-        elif os.path.isfile(user_input):
-            with open(user_input, 'r', encoding='utf-8') as file:
-                result = classifier.predict_clickbait(file)
-            print(f"File article classification: {result}")
-            
-        else:
-            result = classifier.predict_clickbait(user_input)
-            print(f"HTML string classification: {result}")
+    try:
+        print("\nInitializing Clickbait Classifier...")
+        classifier = ClickbaitClassifierRoBERTa()
+        classifier.run_interactive()
+    except Exception as e:
+        print(f"Fatal error: {str(e)}")
+    finally:
+        print("\nExiting program.")
 
 if __name__ == "__main__":
     main()
