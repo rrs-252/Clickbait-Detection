@@ -288,7 +288,7 @@ print("\nModel saved successfully!")
 print(f"Model files saved in: {os.path.abspath('saved_model')}")
 
 # Function to load the saved model (for future use)
-def load_saved_model(model_dir='saved_model'):
+def load_saved_model(model_dir='./saved_model'):
     # Load configuration
     with open(f'{model_dir}/model_config.json', 'r') as f:
         config = json.load(f)
