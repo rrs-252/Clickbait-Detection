@@ -326,33 +326,69 @@ print(f"Model files saved in: {os.path.abspath('saved_model_roberta')}")
 
 # Function to load the saved model (for future use)
 def load_saved_model(model_dir='./saved_model_roberta', device='cuda' if torch.cuda.is_available() else 'cpu'):
+    # Define file paths
+    config_path = f'{model_dir}/model_config.json'
+    model_path = f'{model_dir}/lda_roberta_model.pt'
+    lda_path = f'{model_dir}/lda_roberta_model_lda.model'
+    dict_path = f'{model_dir}/lda_roberta_model_dictionary.dict'
+    label_encoder_path = f'{model_dir}/lda_roberta_model_label_encoder.npy'
+    
+    # Check if all required files exist
+    required_files = [config_path, model_path, lda_path, dict_path, label_encoder_path]
+    for path in required_files:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required file not found: {path}")
+        else:
+            print(f"Found file: {path}")
+
     # Load configuration
-    with open(f'{model_dir}/model_config.json', 'r') as f:
+    print("Loading model configuration...")
+    with open(config_path, 'r') as f:
         config = json.load(f)
     
     # Initialize tokenizer
+    print("Initializing tokenizer...")
     tokenizer = RobertaTokenizer.from_pretrained(config['tokenizer_name'])
     
     # Load RoBERTa and initialize combined model
+    print("Initializing RoBERTa model...")
     roberta_model = RobertaModel.from_pretrained(config['model_architecture']['base_model'])
-    model = LDARoBERTaClassifier(
-        roberta_model, 
-        config['num_lda_topics']
-    ).to(device)
+    model = LDARoBERTaClassifier(roberta_model, config['num_lda_topics']).to(device)
     
     # Load model state
-    checkpoint = torch.load(f'{model_dir}/lda_roberta_model.pt', map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
+    try:
+        print("Loading model state...")
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()  # Ensure the model is in evaluation mode
+        print("Model state loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading model state: {str(e)}")
+
     # Load LDA model
-    lda_model = LdaMulticore.load(f'{model_dir}/lda_roberta_model_lda.model')
-    
+    try:
+        print("Loading LDA model...")
+        lda_model = LdaMulticore.load(lda_path)
+        print("LDA model loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading LDA model: {str(e)}")
+
     # Load dictionary
-    dictionary = corpora.Dictionary.load(f'{model_dir}/lda_roberta_model_dictionary.dict')
-    
+    try:
+        print("Loading dictionary...")
+        dictionary = corpora.Dictionary.load(dict_path)
+        print("Dictionary loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading dictionary: {str(e)}")
+
     # Load label encoder classes
-    label_encoder = LabelEncoder()
-    label_encoder.classes_ = np.load(f'{model_dir}/lda_roberta_model_label_encoder.npy', allow_pickle=True)
+    try:
+        print("Loading label encoder...")
+        label_encoder = LabelEncoder()
+        label_encoder.classes_ = np.load(label_encoder_path, allow_pickle=True)
+        print("Label encoder loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading label encoder: {str(e)}")
     
     # Create a class to handle predictions
     class ModelPredictor:
