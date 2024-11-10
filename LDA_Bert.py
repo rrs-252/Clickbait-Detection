@@ -289,30 +289,39 @@ print(f"Model files saved in: {os.path.abspath('saved_model')}")
 
 # Function to load the saved model (for future use)
 def load_saved_model(model_dir='./saved_model'):
+    # Check if the model files exist
+    config_path = f'{model_dir}/model_config.json'
+    model_path = f'{model_dir}/lda_bert_model.pt'
+    lda_path = f'{model_dir}/lda_bert_model_lda.model'
+    dict_path = f'{model_dir}/lda_bert_model_dictionary.dict'
+    label_encoder_path = f'{model_dir}/lda_bert_model_label_encoder.npy'
+    
+    if not all(os.path.exists(path) for path in [config_path, model_path, lda_path, dict_path, label_encoder_path]):
+        raise FileNotFoundError("One or more required files are missing. Ensure the model is properly saved in the specified directory.")
+
     # Load configuration
-    with open(f'{model_dir}/model_config.json', 'r') as f:
+    with open(config_path, 'r') as f:
         config = json.load(f)
     
     # Initialize tokenizer
     tokenizer = BertTokenizer.from_pretrained(config['tokenizer_name'])
     
-    # Load BERT and initialize combined model
+    # Load BERT model and initialize combined model
     bert_model = BertModel.from_pretrained(config['tokenizer_name'])
     model = LDABertClassifier(bert_model, config['num_lda_topics'])
     
     # Load model state
-    checkpoint = torch.load(f'{model_dir}/lda_bert_model.pt')
+    checkpoint = torch.load(model_path)
     model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()  # Ensure the model is in evaluation mode
     
-    # Load LDA model
-    lda_model = LdaMulticore.load(f'{model_dir}/lda_bert_model_lda.model')
-    
-    # Load dictionary
-    dictionary = corpora.Dictionary.load(f'{model_dir}/lda_bert_model_dictionary.dict')
+    # Load LDA model and dictionary
+    lda_model = LdaMulticore.load(lda_path)
+    dictionary = corpora.Dictionary.load(dict_path)
     
     # Load label encoder classes
     label_encoder = LabelEncoder()
-    label_encoder.classes_ = np.load(f'{model_dir}/lda_bert_model_label_encoder.npy', allow_pickle=True)
+    label_encoder.classes_ = np.load(label_encoder_path, allow_pickle=True)
     
     return model, tokenizer, lda_model, dictionary, label_encoder, config
 
