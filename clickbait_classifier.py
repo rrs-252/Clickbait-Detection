@@ -1,138 +1,91 @@
+import sys
 import torch
-import os
-from transformers import BertTokenizer, BertModel
-from gensim import corpora
-from gensim.models import LdaMulticore
-from sklearn.preprocessing import LabelEncoder
 from html_parser_preprocessor import HTMLParserPreprocessor
+from LDA_Bert import load_saved_model
+import torch.nn.functional as F
 
 class ClickbaitClassifier:
-    def __init__(self, model_path='/content/LDA-Bert/saved_model'):
-        # Set device
+    def __init__(self, model_dir='saved_model'):
+        self.html_parser = HTMLParserPreprocessor()
+        print("Loading the model...")
+        self.model, self.tokenizer, self.lda_model, self.dictionary, \
+            self.label_encoder, self.config = load_saved_model(model_dir)
+        
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"Using device: {self.device}")
+        self.model = self.model.to(self.device)
+        self.model.eval()
+        print("Model loaded successfully!")
 
-        # Initialize HTML parser
-        self.parser = HTMLParserPreprocessor()
-        
-        # Initialize BERT on GPU
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.bert_model = BertModel.from_pretrained('bert-base-uncased').to(self.device)
-        
-        # Initialize label encoder
-        self.label_encoder = LabelEncoder()
-        self.label_encoder.classes_ = ['clickbait', 'not clickbait']
-        
-        # Load the dictionary and LDA model from saved files
-        self.dictionary = corpora.Dictionary.load(os.path.join(model_path, 'dictionary.dict'))
-        self.lda_model = LdaMulticore.load(os.path.join(model_path, 'lda_model.model'))
-        
-        # Load the pretrained classifier
-        self.load_trained_classifier(model_path)
-
-    def load_trained_classifier(self, model_path):
-        """Load the pretrained classifier from the saved model"""
+    def process_input(self, input_text):
         try:
-            # Load model architecture and weights
-            model_file = os.path.join(model_path, 'clickbait_classifier.pth')
-            self.classifier = torch.load(model_file, map_location=self.device)
-            self.classifier.eval()  # Set to evaluation mode
-            print(f"Successfully loaded classifier from {model_file}")
+            return self.html_parser.parse_and_extract(input_text)
         except Exception as e:
-            raise ValueError(f"Error loading classifier from {model_path}: {str(e)}")
+            print(f"Error processing input: {str(e)}")
+            return None
 
-    def get_lda_features(self, text):
-        """Extract LDA features from text"""
-        # Tokenize and get document-term matrix
-        bow = self.dictionary.doc2bow(text.split())
-        # Get topic distribution
-        topic_dist = self.lda_model.get_document_topics(bow, minimum_probability=0.0)
-        # Convert to dense vector
-        lda_features = [0] * self.lda_model.num_topics
-        for topic_id, prob in topic_dist:
-            lda_features[topic_id] = prob
-        return torch.tensor(lda_features, dtype=torch.float32, device=self.device)
-
-    @torch.no_grad()
-    def predict_clickbait(self, html_content):
-        """
-        Predict whether content is clickbait or not using the pretrained model.
-        """
+    def classify(self, processed_text):
         try:
-            # Parse HTML content
-            processed_text = self.parser.parse_and_extract(html_content)
-            
-            # Get LDA features
-            lda_features = self.get_lda_features(processed_text)
-            
-            # Get BERT features
-            bert_tokens = self.tokenizer(
-                processed_text,
-                padding='max_length',
-                truncation=True,
-                max_length=512,
-                return_tensors="pt"
-            ).to(self.device)
-            
-            bert_output = self.bert_model(
-                input_ids=bert_tokens['input_ids'],
-                attention_mask=bert_tokens['attention_mask']
-            )
-            bert_embedding = bert_output.last_hidden_state.mean(dim=1)
-            
-            # Combine features
-            combined_features = torch.cat(
-                (lda_features, bert_embedding.squeeze()),
-                dim=0
-            ).unsqueeze(0)  # Add batch dimension
-            
-            # Get prediction from pretrained classifier
-            logits = self.classifier(combined_features)
-            predicted_label = torch.argmax(logits, dim=1).item()
-            
-            return self.label_encoder.inverse_transform([predicted_label])[0]
-            
+            with torch.no_grad():
+                # Prepare LDA features
+                bow = self.dictionary.doc2bow(processed_text.split())
+                topic_probs = [0] * self.config['num_lda_topics']
+                for topic, prob in self.lda_model.get_document_topics(bow):
+                    topic_probs[topic] = prob
+
+                # Prepare BERT features
+                bert_tokens = self.tokenizer(
+                    processed_text,
+                    padding='max_length',
+                    truncation=True,
+                    max_length=self.config['max_length'],
+                    return_tensors="pt"
+                )
+
+                input_ids = bert_tokens['input_ids'].to(self.device)
+                attention_mask = bert_tokens['attention_mask'].to(self.device)
+                lda_features = torch.tensor([topic_probs], dtype=torch.float).to(self.device)
+
+                outputs = self.model(input_ids, attention_mask, lda_features)
+                prediction = torch.argmax(outputs, dim=1)
+                return self.label_encoder.inverse_transform(prediction.cpu().numpy())[0]
+
         except Exception as e:
-            print(f"Error during prediction: {str(e)}")
-            return "Error in prediction"
-        finally:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            print(f"Error during classification: {str(e)}")
+            return None
 
-def main():
-    # Initialize the classifier
-    try:
-        classifier = ClickbaitClassifier()
-        print("Classifier initialized successfully")
-    except Exception as e:
-        print(f"Error initializing classifier: {str(e)}")
-        return
-
-    while True:
-        try:
-            user_input = input("\nEnter a website URL, HTML file path, or HTML content (type 'quit' to exit): ")
+    def run_interactive(self):
+        print("\nClickbait Classifier")
+        print("Enter a URL or paste HTML content (type 'quit' to exit)")
+        
+        while True:
+            user_input = input("\nEnter URL or HTML content: ").strip()
             
             if user_input.lower() == 'quit':
                 break
-                
-            if user_input.startswith('http'):
-                result = classifier.predict_clickbait(user_input)
-                print(f"URL article classification: {result}")
-                
-            elif os.path.isfile(user_input):
-                with open(user_input, 'r', encoding='utf-8') as file:
-                    result = classifier.predict_clickbait(file)
-                print(f"File article classification: {result}")
-                
-            else:
-                result = classifier.predict_clickbait(user_input)
-                print(f"HTML string classification: {result}")
-                
-        except Exception as e:
-            print(f"Error processing input: {str(e)}")
             
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            if not user_input:
+                print("Please provide valid input!")
+                continue
+
+            processed_text = self.process_input(user_input)
+            
+            if processed_text:
+                result = self.classify(processed_text)
+                if result:
+                    print(f"Result: {result.upper()}")
+                else:
+                    print("Classification failed. Please try again.")
+            else:
+                print("Failed to process input. Please check your URL or HTML content.")
+
+def main():
+    try:
+        classifier = ClickbaitClassifier()
+        classifier.run_interactive()
+    except Exception as e:
+        print(f"Error: {str(e)}")
+    finally:
+        print("\nExiting program.")
 
 if __name__ == "__main__":
     main()
