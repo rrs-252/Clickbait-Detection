@@ -5,7 +5,7 @@ from LDA_RoBERTa import load_saved_model
 import torch.nn.functional as F
 
 class ClickbaitClassifierRoBERTa:
-    def __init__(self, model_dir='saved_model_roberta'):
+    def __init__(self, model_dir='./saved_model_roberta'):
         self.html_parser = HTMLParserPreprocessor()
         print("Loading the model...")
         self.predictor, self.config = load_saved_model(model_dir)
