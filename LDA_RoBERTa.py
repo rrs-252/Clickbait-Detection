@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import json
 
 # Import HTMLParserPreprocessor from the separate file
-from html_parser_preprocessor-2 import HTMLParserPreprocessor
+from html_parser_preprocessor import HTMLParserPreprocessor
 
 # Memory management functions
 def clear_memory():
@@ -242,8 +242,8 @@ def save_model(model, optimizer, scheduler, config, metrics, label_encoder, dict
 
 def main():
     # Configuration
-    CLICKBAIT_PATH = "./train_data/train_clickbait"
-    NOT_CLICKBAIT_PATH = "./train_data/train_not_clickbait"
+    CLICKBAIT_PATH = "./train_data/train_clickbait.txt"
+    NOT_CLICKBAIT_PATH = "./train_data/train_not_clickbait.txt"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
