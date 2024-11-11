@@ -14,6 +14,9 @@ from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import json
 
+# Import HTMLParserPreprocessor from the separate file
+from html_parser_preprocessor-2 import HTMLParserPreprocessor
+
 # Memory management functions
 def clear_memory():
     gc.collect()
@@ -96,19 +99,25 @@ def prepare_data(clickbait_path, not_clickbait_path):
     texts = []
     labels = []
 
+    # Create an instance of the HTMLParserPreprocessor
+    html_parser = HTMLParserPreprocessor()
+
+    # Preprocess clickbait data
     chunk_texts, chunk_labels = load_data_in_chunks(clickbait_path, "clickbait")
-    texts.extend(chunk_texts)
+    texts.extend([html_parser.parse_and_extract(text) for text in chunk_texts])
     labels.extend(chunk_labels)
     clear_memory()
 
+    # Preprocess non-clickbait data
     chunk_texts, chunk_labels = load_data_in_chunks(not_clickbait_path, "not clickbait")
-    texts.extend(chunk_texts)
+    texts.extend([html_parser.parse_and_extract(text) for text in chunk_texts])
     labels.extend(chunk_labels)
     clear_memory()
 
     label_encoder = LabelEncoder()
     encoded_labels = label_encoder.fit_transform(labels)
 
+    # Split the data into train and test sets
     train_texts, test_texts, train_labels, test_labels = train_test_split(
         texts, encoded_labels, test_size=0.2, random_state=42)
 
@@ -349,6 +358,7 @@ def load_saved_model(model_dir='./saved_model_roberta', device='cuda' if torch.c
         raise RuntimeError(f"Error loading model state: {str(e)}")
 
     # Load LDA model
+    # Load LDA model
     try:
         print("Loading LDA model...")
         lda_model = LdaMulticore.load(lda_path)
@@ -418,7 +428,3 @@ def load_saved_model(model_dir='./saved_model_roberta', device='cuda' if torch.c
     predictor = ModelPredictor(model, tokenizer, lda_model, dictionary, label_encoder, device)
     
     return predictor, config
-
-print("\nTo load the saved model and make predictions, use:")
-print("predictor, config = load_saved_model()")
-print("result = predictor.predict('Your text here')")
