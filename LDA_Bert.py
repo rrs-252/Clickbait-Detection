@@ -15,6 +15,9 @@ from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import json
 
+# Import the HTMLParserPreprocessor
+from html_parser_preprocessor import HTMLParserPreprocessor
+
 # Memory management functions
 def clear_memory():
     gc.collect()
@@ -24,13 +27,17 @@ def print_gpu_memory():
     print(f'GPU Memory Allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
     print(f'GPU Memory Reserved: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
+# Modified data loading with chunking and HTML parsing
 def load_data_in_chunks(file_path, label, chunk_size=1000):
     texts = []
     labels = []
     with open(file_path, 'r') as file:
         chunk = []
         for line in file:
-            chunk.append(line.strip())
+            # Use the HTMLParserPreprocessor to extract text from the HTML
+            html_preprocessor = HTMLParserPreprocessor()
+            text = html_preprocessor.parse_and_extract(line.strip())
+            chunk.append(text)
             if len(chunk) >= chunk_size:
                 texts.extend(chunk)
                 labels.extend([label] * len(chunk))
@@ -94,7 +101,7 @@ class LDABertClassifier(nn.Module):
         return self.classifier(combined_features)
 
 def load_and_prepare_data(clickbait_path, not_clickbait_path):
-    # Load data with chunking
+    # Load data with chunking and HTML parsing
     texts = []
     labels = []
 
