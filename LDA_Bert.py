@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import json
+import glob
 
 # Import the HTMLParserPreprocessor
 from html_parser_preprocessor import HTMLParserPreprocessor
@@ -256,6 +257,17 @@ def load_saved_model(model_dir='./saved_model'):
     
     return model, tokenizer, lda_model, dictionary, label_encoder, config
 
+def delete_checkpoints(checkpoint_dir='.', filename_pattern='checkpoint_epoch_*.pt'):
+    # If the directory is the current repo, use '.'
+    checkpoint_files = glob.glob(os.path.join(checkpoint_dir, filename_pattern))
+    
+    for file_path in checkpoint_files:
+        try:
+            os.remove(file_path)
+            print(f"Deleted checkpoint: {file_path}")
+        except OSError as e:
+            print(f"Error deleting file {file_path}: {e}")
+
 def main():
     # Configuration
     CLICKBAIT_PATH = "./train_data/train_clickbait.txt"
@@ -331,6 +343,8 @@ def main():
     save_model(model, tokenizer, lda_model, dictionary, label_encoder, config, metrics)
     print("\nModel saved successfully!")
     print(f"Model files saved in: {os.path.abspath('saved_model')}")
+    
+    delete_checkpoints(checkpoint_dir='./checkpoints', filename_pattern='checkpoint_epoch_*.pt')
 
 if __name__ == "__main__":
     main()
