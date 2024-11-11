@@ -243,14 +243,14 @@ def save_model(model, optimizer, scheduler, config, metrics, label_encoder, dict
     
     def delete_checkpoints(checkpoint_dir='.', filename_pattern='checkpoint_epoch_*.pt'):
     # If the directory is the current repo, use '.'
-    checkpoint_files = glob.glob(os.path.join(checkpoint_dir, filename_pattern))
+        checkpoint_files = glob.glob(os.path.join(checkpoint_dir, filename_pattern))
     
-    for file_path in checkpoint_files:
-        try:
-            os.remove(file_path)
-            print(f"Deleted checkpoint: {file_path}")
-        except OSError as e:
-            print(f"Error deleting file {file_path}: {e}")
+        for file_path in checkpoint_files:
+            try:
+                os.remove(file_path)
+                print(f"Deleted checkpoint: {file_path}")
+            except OSError as e:
+                print(f"Error deleting file {file_path}: {e}")
 
 
 
