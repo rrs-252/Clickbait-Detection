@@ -24,10 +24,6 @@ def print_gpu_memory():
     print(f'GPU Memory Allocated: {torch.cuda.memory_allocated()/1024**2:.2f} MB')
     print(f'GPU Memory Reserved: {torch.cuda.memory_reserved()/1024**2:.2f} MB')
 
-# Check GPU availability
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
 # Modified data loading with chunking
 def load_data_in_chunks(file_path, label, chunk_size=1000):
     texts = []
@@ -45,52 +41,10 @@ def load_data_in_chunks(file_path, label, chunk_size=1000):
             texts.extend(chunk)
             labels.extend([label] * len(chunk))
     return texts, labels
-    
-# Paths to the datasets
-CLICKBAIT_PATH = "./train_data/train_clickbait.txt"
-NOT_CLICKBAIT_PATH = "./train_data/train_not_clickbait.txt"
 
-# Load data with chunking
-texts = []
-labels = []
-
-chunk_texts, chunk_labels = load_data_in_chunks(CLICKBAIT_PATH, "clickbait")
-texts.extend(chunk_texts)
-labels.extend(chunk_labels)
-clear_memory()
-
-chunk_texts, chunk_labels = load_data_in_chunks(NOT_CLICKBAIT_PATH, "not clickbait")
-texts.extend(chunk_texts)
-labels.extend(chunk_labels)
-clear_memory()
-
-# Encode labels
-label_encoder = LabelEncoder()
-encoded_labels = label_encoder.fit_transform(labels)
-
-# Split data
-train_texts, test_texts, train_labels, test_labels = train_test_split(
-    texts, encoded_labels, test_size=0.2, random_state=42)
-
-# Free memory
-del texts, labels, encoded_labels
-clear_memory()
-
-# Modified LDA part with memory efficiency
-dictionary = corpora.Dictionary([text.split() for text in train_texts])
-corpus = [dictionary.doc2bow(text.split()) for text in train_texts]
-num_topics = 10
-lda_model = LdaMulticore(corpus=corpus, id2word=dictionary, 
-                        num_topics=num_topics, workers=2,
-                        batch=True)  # Enable batch processing
-
-# Free memory
-del corpus
-clear_memory()
-
-# Modified Dataset class with memory optimization
+# Dataset class
 class TextDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length=256):  # Reduced max_length
+    def __init__(self, texts, labels, tokenizer, max_length=256):
         self.texts = texts
         self.labels = labels
         self.tokenizer = tokenizer
@@ -125,12 +79,12 @@ class TextDataset(Dataset):
             'label': torch.tensor(label, dtype=torch.long)
         }
 
-# Modified model with gradient checkpointing
+# Model class
 class LDABertClassifier(nn.Module):
     def __init__(self, bert_model, num_lda_features):
         super().__init__()
         self.bert_model = bert_model
-        self.bert_model.gradient_checkpointing_enable()  # Enable gradient checkpointing
+        self.bert_model.gradient_checkpointing_enable()
         self.num_lda_features = num_lda_features
         self.classifier = nn.Linear(bert_model.config.hidden_size + num_lda_features, 2)
 
@@ -139,190 +93,261 @@ class LDABertClassifier(nn.Module):
         combined_features = torch.cat((bert_output, lda_features), dim=1)
         return self.classifier(combined_features)
 
-# Initialize model and move to GPU
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-bert_model = BertModel.from_pretrained('bert-base-uncased')
-lda_bert_model = LDABertClassifier(bert_model, num_topics).to(device)
-
-# Create datasets with smaller batch size
-train_dataset = TextDataset(train_texts, train_labels, tokenizer)
-test_dataset = TextDataset(test_texts, test_labels, tokenizer)
-
-# Smaller batch size and gradient accumulation
-batch_size = 4
-accumulation_steps = 4
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-# Training setup
-num_epochs = 10
-learning_rate = 1e-5
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.AdamW(lda_bert_model.parameters(), lr=learning_rate)
-
-# Modified training loop with gradient accumulation and memory management
-for epoch in range(num_epochs):
-    lda_bert_model.train()
-    train_loss = 0.0
-    optimizer.zero_grad()
+# Training and evaluation function
+def train_and_evaluate_model(
+    model,
+    train_loader,
+    test_loader,
+    num_epochs=10,
+    learning_rate=1e-5,
+    accumulation_steps=4,
+    device='cuda',
+    checkpoint_dir='checkpoints'
+):
+    """
+    Train and evaluate the LDA-BERT model with memory management and gradient accumulation.
+    """
+    os.makedirs(checkpoint_dir, exist_ok=True)
     
-    for i, batch in enumerate(tqdm(train_loader)):
-        # Move batch to GPU
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        lda_features = batch['lda_features'].to(device)
-        labels = batch['label'].to(device)
-        
-        # Forward pass
-        outputs = lda_bert_model(input_ids, attention_mask, lda_features)
-        loss = criterion(outputs, labels)
-        loss = loss / accumulation_steps  # Normalize loss
-        loss.backward()
-        
-        if (i + 1) % accumulation_steps == 0:
-            optimizer.step()
-            optimizer.zero_grad()
-            clear_memory()
-        
-        train_loss += loss.item() * accumulation_steps
-        
-        # Print memory usage every 100 batches
-        if i % 100 == 0:
-            print_gpu_memory()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    best_f1 = 0.0
+    best_checkpoint_path = None
     
-    avg_loss = train_loss / len(train_loader)
-    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
-    
-    # Save checkpoint after each epoch
-    torch.save({
-        'epoch': epoch,
-        'model_state_dict': lda_bert_model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'loss': avg_loss,
-    }, f'checkpoint_epoch_{epoch}.pt')
-    
-    clear_memory()
-
-# Evaluation with memory management
-lda_bert_model.eval()
-y_true = []
-y_pred = []
-
-with torch.no_grad():
-    for batch in tqdm(test_loader):
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        lda_features = batch['lda_features'].to(device)
-        labels = batch['label'].to(device)
+    for epoch in range(num_epochs):
+        # Training phase
+        model.train()
+        train_loss = 0.0
+        optimizer.zero_grad()
         
-        outputs = lda_bert_model(input_ids, attention_mask, lda_features)
-        _, predicted = torch.max(outputs, 1)
+        for i, batch in enumerate(tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}')):
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            lda_features = batch['lda_features'].to(device)
+            labels = batch['label'].to(device)
+            
+            outputs = model(input_ids, attention_mask, lda_features)
+            loss = criterion(outputs, labels)
+            loss = loss / accumulation_steps
+            
+            loss.backward()
+            
+            if (i + 1) % accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                clear_memory()
+            
+            train_loss += loss.item() * accumulation_steps
+            
+            if i % 100 == 0:
+                print_gpu_memory()
         
-        y_true.extend(labels.cpu().tolist())
-        y_pred.extend(predicted.cpu().tolist())
+        avg_loss = train_loss / len(train_loader)
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
+        
+        # Evaluation phase
+        model.eval()
+        y_true = []
+        y_pred = []
+        
+        with torch.no_grad():
+            for batch in tqdm(test_loader, desc='Evaluating'):
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+                lda_features = batch['lda_features'].to(device)
+                labels = batch['label'].to(device)
+                
+                outputs = model(input_ids, attention_mask, lda_features)
+                _, predicted = torch.max(outputs, 1)
+                
+                y_true.extend(labels.cpu().tolist())
+                y_pred.extend(predicted.cpu().tolist())
+                
+                clear_memory()
+        
+        metrics = {
+            'accuracy': accuracy_score(y_true, y_pred),
+            'precision': precision_score(y_true, y_pred, average='weighted'),
+            'recall': recall_score(y_true, y_pred, average='weighted'),
+            'f1': f1_score(y_true, y_pred, average='weighted')
+        }
+        
+        print(f"\nEpoch {epoch+1} Results:")
+        for metric, value in metrics.items():
+            print(f"{metric.capitalize()}: {value:.4f}")
+        
+        checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch}.pt')
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': avg_loss,
+            'metrics': metrics
+        }
+        torch.save(checkpoint, checkpoint_path)
+        
+        if metrics['f1'] > best_f1:
+            best_f1 = metrics['f1']
+            best_checkpoint_path = checkpoint_path
         
         clear_memory()
-
-# Calculate metrics
-metrics = {
-    'accuracy': accuracy_score(y_true, y_pred),
-    'precision': precision_score(y_true, y_pred, average='weighted'),
-    'recall': recall_score(y_true, y_pred, average='weighted'),
-    'f1': f1_score(y_true, y_pred, average='weighted')
-}
-
-print("\nFinal Results:")
-for metric, value in metrics.items():
-    print(f"{metric.capitalize()}: {value:.4f}")
-
-if metrics['accuracy'] > 0.8 and metrics['f1'] > 0.8:
-    print("Model training successful!")
-else:
-    print("Model training needs improvement.")
-
-# Create a directory for the model if it doesn't exist
-os.makedirs('saved_model', exist_ok=True)
-
-# Save the complete model
-model_save_path = 'saved_model/lda_bert_model'
-config_save_path = 'saved_model/model_config.json'
-
-# Save the model state and architecture
-torch.save({
-    'model_state_dict': lda_bert_model.state_dict(),
-    'model_config': {
-        'bert_model_name': 'bert-base-uncased',
-        'num_lda_topics': num_topics,
-        'max_length': train_dataset.max_length
-    }
-}, f'{model_save_path}.pt')
-
-# Save the LDA model
-lda_model.save(f'{model_save_path}_lda.model')
-
-# Save the dictionary
-dictionary.save(f'{model_save_path}_dictionary.dict')
-
-# Save the label encoder
-with open(f'{model_save_path}_label_encoder.npy', 'wb') as f:
-    np.save(f, label_encoder.classes_)
-
-# Save additional configuration and metadata
-config = {
-    'model_performance': metrics,
-    'training_params': {
-        'batch_size': batch_size,
-        'learning_rate': learning_rate,
-        'num_epochs': num_epochs,
-        'accumulation_steps': accumulation_steps
-    },
-    'tokenizer_name': 'bert-base-uncased',
-    'max_length': train_dataset.max_length,
-    'num_lda_topics': num_topics
-}
-
-with open(config_save_path, 'w') as f:
-    json.dump(config, f, indent=4)
-
-print("\nModel saved successfully!")
-print(f"Model files saved in: {os.path.abspath('saved_model')}")
-
-# Function to load the saved model (for future use)
-def load_saved_model(model_dir='./saved_model'):
-    # Check if the model files exist
-    config_path = f'{model_dir}/model_config.json'
-    model_path = f'{model_dir}/lda_bert_model.pt'
-    lda_path = f'{model_dir}/lda_bert_model_lda.model'
-    dict_path = f'{model_dir}/lda_bert_model_dictionary.dict'
-    label_encoder_path = f'{model_dir}/lda_bert_model_label_encoder.npy'
     
-    if not all(os.path.exists(path) for path in [config_path, model_path, lda_path, dict_path, label_encoder_path]):
-        raise FileNotFoundError("One or more required files are missing. Ensure the model is properly saved in the specified directory.")
+    best_checkpoint = torch.load(best_checkpoint_path)
+    model.load_state_dict(best_checkpoint['model_state_dict'])
+    
+    if best_checkpoint['metrics']['accuracy'] > 0.8 and best_checkpoint['metrics']['f1'] > 0.8:
+        print("\nModel training successful!")
+    else:
+        print("\nModel training needs improvement.")
+    
+    return {
+        'best_metrics': best_checkpoint['metrics'],
+        'best_checkpoint_path': best_checkpoint_path,
+        'final_loss': best_checkpoint['loss']
+    }
 
+def load_saved_model(model_dir='./saved_model'):
     # Load configuration
-    with open(config_path, 'r') as f:
+    with open(f'{model_dir}/model_config.json', 'r') as f:
         config = json.load(f)
     
     # Initialize tokenizer
     tokenizer = BertTokenizer.from_pretrained(config['tokenizer_name'])
     
-    # Load BERT model and initialize combined model
+    # Load BERT and initialize combined model
     bert_model = BertModel.from_pretrained(config['tokenizer_name'])
     model = LDABertClassifier(bert_model, config['num_lda_topics'])
     
     # Load model state
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load(f'{model_dir}/lda_bert_model.pt')
     model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()  # Ensure the model is in evaluation mode
     
-    # Load LDA model and dictionary
-    lda_model = LdaMulticore.load(lda_path)
-    dictionary = corpora.Dictionary.load(dict_path)
+    # Load LDA model
+    lda_model = LdaMulticore.load(f'{model_dir}/lda_bert_model_lda.model')
+    
+    # Load dictionary
+    dictionary = corpora.Dictionary.load(f'{model_dir}/lda_bert_model_dictionary.dict')
     
     # Load label encoder classes
     label_encoder = LabelEncoder()
-    label_encoder.classes_ = np.load(label_encoder_path, allow_pickle=True)
+    label_encoder.classes_ = np.load(f'{model_dir}/lda_bert_model_label_encoder.npy', allow_pickle=True)
     
     return model, tokenizer, lda_model, dictionary, label_encoder, config
 
-print("\nTo load the saved model later, use the load_saved_model() function.")
+def main():
+    # Check GPU availability
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # Paths to the datasets
+    CLICKBAIT_PATH = "./train_data/train_clickbait.txt"
+    NOT_CLICKBAIT_PATH = "./train_data/train_not_clickbait.txt"
+
+    # Load data with chunking
+    texts = []
+    labels = []
+
+    chunk_texts, chunk_labels = load_data_in_chunks(CLICKBAIT_PATH, "clickbait")
+    texts.extend(chunk_texts)
+    labels.extend(chunk_labels)
+    clear_memory()
+
+    chunk_texts, chunk_labels = load_data_in_chunks(NOT_CLICKBAIT_PATH, "not clickbait")
+    texts.extend(chunk_texts)
+    labels.extend(chunk_labels)
+    clear_memory()
+
+    # Encode labels
+    label_encoder = LabelEncoder()
+    encoded_labels = label_encoder.fit_transform(labels)
+
+    # Split data
+    train_texts, test_texts, train_labels, test_labels = train_test_split(
+        texts, encoded_labels, test_size=0.2, random_state=42)
+
+    # Free memory
+    del texts, labels, encoded_labels
+    clear_memory()
+
+    # LDA part
+    global dictionary, lda_model, num_topics
+    dictionary = corpora.Dictionary([text.split() for text in train_texts])
+    corpus = [dictionary.doc2bow(text.split()) for text in train_texts]
+    num_topics = 10
+    lda_model = LdaMulticore(corpus=corpus, id2word=dictionary, 
+                            num_topics=num_topics, workers=2,
+                            batch=True)
+
+    del corpus
+    clear_memory()
+
+    # Initialize model and move to GPU
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    bert_model = BertModel.from_pretrained('bert-base-uncased')
+    lda_bert_model = LDABertClassifier(bert_model, num_topics).to(device)
+
+    # Create datasets with smaller batch size
+    train_dataset = TextDataset(train_texts, train_labels, tokenizer)
+    test_dataset = TextDataset(test_texts, test_labels, tokenizer)
+
+    # DataLoaders
+    batch_size = 4
+    accumulation_steps = 4
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    # Train and evaluate
+    results = train_and_evaluate_model(
+        model=lda_bert_model,
+        train_loader=train_loader,
+        test_loader=test_loader,
+        device=device,
+        checkpoint_dir='model_checkpoints'
+    )
+
+    # Save the model and configuration
+    os.makedirs('saved_model', exist_ok=True)
+    
+    # Save model files
+    model_save_path = 'saved_model/lda_bert_model'
+    config_save_path = 'saved_model/model_config.json'
+    
+    torch.save({
+        'model_state_dict': lda_bert_model.state_dict(),
+        'model_config': {
+            'bert_model_name': 'bert-base-uncased',
+            'num_lda_topics': num_topics,
+            'max_length': train_dataset.max_length
+        }
+    }, f'{model_save_path}.pt')
+    
+    # Save additional models and configurations
+    lda_model.save(f'{model_save_path}_lda.model')
+    dictionary.save(f'{model_save_path}_dictionary.dict')
+    
+    with open(f'{model_save_path}_label_encoder.npy', 'wb') as f:
+        np.save(f, label_encoder.classes_)
+    
+    # Save metrics and parameters
+    config = {
+        'model_performance': results['best_metrics'],
+        'training_params': {
+            'batch_size': batch_size,
+            'learning_rate': 1e-5,
+            'num_epochs': 10,
+            'accumulation_steps': accumulation_steps
+        },
+        'tokenizer_name': 'bert-base-uncased',
+        'max_length': train_dataset.max_length,
+        'num_lda_topics': num_topics
+    }
+    
+    with open(config_save_path, 'w') as f:
+        json.dump(config, f, indent=4)
+
+    print("\nModel saved successfully!")
+    print(f"Model files saved in: {os.path.abspath('saved_model')}")
+    print("\nTo load the saved model later, use the load_saved_model() function.")
+
+if __name__ == "__main__":
+    main()
