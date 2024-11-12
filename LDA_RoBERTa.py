@@ -241,7 +241,7 @@ def save_model(model, optimizer, scheduler, config, metrics, label_encoder, dict
 
     print(f"\nModel saved successfully in: {os.path.abspath(save_dir)}")
     
-    def delete_checkpoints(checkpoint_dir='.', filename_pattern='checkpoint_epoch_*.pt'):
+def delete_checkpoints(checkpoint_dir='.', filename_pattern='checkpoint_epoch_*.pt'):
     # If the directory is the current repo, use '.'
         checkpoint_files = glob.glob(os.path.join(checkpoint_dir, filename_pattern))
     
