@@ -12,6 +12,7 @@ from typing import Union, IO
 nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
+nltk.download('punkt_tab')
 
 class HTMLParserPreprocessor:
     def __init__(self):
