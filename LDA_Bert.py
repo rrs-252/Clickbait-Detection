@@ -229,33 +229,116 @@ def save_model(model, tokenizer, lda_model, dictionary, label_encoder, config, m
     with open(f'{save_dir}/model_config.json', 'w') as f:
         json.dump(config, f, indent=4)
 
-def load_saved_model(model_dir='./saved_model'):
+def load_saved_model(model_dir='./saved_model', device='cuda' if torch.cuda.is_available() else 'cpu'):
+    # Define file paths
+    config_path = f'{model_dir}/model_config.json'
+    model_path = f'{model_dir}/lda_bert_model.pt'
+    lda_path = f'{model_dir}/lda_bert_model_lda.model'
+    dict_path = f'{model_dir}/lda_bert_model_dictionary.dict'
+    label_encoder_path = f'{model_dir}/lda_bert_model_label_encoder.npy'
+    
+    # Check if all required files exist
+    required_files = [config_path, model_path, lda_path, dict_path, label_encoder_path]
+    for path in required_files:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Required file not found: {path}")
+        else:
+            print(f"Found file: {path}")
+
     # Load configuration
-    with open(f'{model_dir}/model_config.json', 'r') as f:
+    print("Loading model configuration...")
+    with open(config_path, 'r') as f:
         config = json.load(f)
     
     # Initialize tokenizer
+    print("Initializing tokenizer...")
     tokenizer = BertTokenizer.from_pretrained(config['tokenizer_name'])
     
     # Load BERT and initialize combined model
+    print("Initializing BERT model...")
     bert_model = BertModel.from_pretrained(config['tokenizer_name'])
-    model = LDABertClassifier(bert_model, config['num_lda_topics'])
+    model = LDABertClassifier(bert_model, config['num_lda_topics']).to(device)
     
     # Load model state
-    checkpoint = torch.load(f'{model_dir}/lda_bert_model.pt')
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
+    try:
+        print("Loading model state...")
+        checkpoint = torch.load(model_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()  # Ensure the model is in evaluation mode
+        print("Model state loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading model state: {str(e)}")
+
     # Load LDA model
-    lda_model = LdaMulticore.load(f'{model_dir}/lda_bert_model_lda.model')
-    
+    try:
+        print("Loading LDA model...")
+        lda_model = LdaMulticore.load(lda_path)
+        print("LDA model loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading LDA model: {str(e)}")
+
     # Load dictionary
-    dictionary = corpora.Dictionary.load(f'{model_dir}/lda_bert_model_dictionary.dict')
-    
+    try:
+        print("Loading dictionary...")
+        dictionary = corpora.Dictionary.load(dict_path)
+        print("Dictionary loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading dictionary: {str(e)}")
+
     # Load label encoder classes
-    label_encoder = LabelEncoder()
-    label_encoder.classes_ = np.load(f'{model_dir}/lda_bert_model_label_encoder.npy', allow_pickle=True)
+    try:
+        print("Loading label encoder...")
+        label_encoder = LabelEncoder()
+        label_encoder.classes_ = np.load(label_encoder_path, allow_pickle=True)
+        print("Label encoder loaded successfully.")
+    except Exception as e:
+        raise RuntimeError(f"Error loading label encoder: {str(e)}")
     
-    return model, tokenizer, lda_model, dictionary, label_encoder, config
+    # Create a class to handle predictions
+    class ModelPredictor:
+        def __init__(self, model, tokenizer, lda_model, dictionary, label_encoder, device, max_length=256):
+            self.model = model
+            self.tokenizer = tokenizer
+            self.lda_model = lda_model
+            self.dictionary = dictionary
+            self.label_encoder = label_encoder
+            self.device = device
+            self.max_length = max_length
+        
+        def predict(self, text):
+            self.model.eval()
+            with torch.no_grad():
+                # Get LDA features
+                bow = self.dictionary.doc2bow(text.split())
+                topic_probs = [0] * config['num_lda_topics']
+                for topic, prob in self.lda_model.get_document_topics(bow):
+                    topic_probs[topic] = prob
+                
+                # Get BERT features
+                tokens = self.tokenizer(
+                    text,
+                    padding='max_length',
+                    truncation=True,
+                    max_length=self.max_length,
+                    return_tensors="pt"
+                )
+                
+                input_ids = tokens['input_ids'].to(self.device)
+                attention_mask = tokens['attention_mask'].to(self.device)
+                lda_features = torch.tensor([topic_probs], dtype=torch.float).to(self.device)
+                
+                outputs = self.model(input_ids, attention_mask, lda_features)
+                _, predicted = torch.max(outputs, 1)
+                
+                return {
+                    'label': self.label_encoder.inverse_transform(predicted.cpu().numpy())[0],
+                    'probabilities': torch.softmax(outputs, dim=1).cpu().numpy()[0]
+                }
+    
+    # Create predictor instance
+    predictor = ModelPredictor(model, tokenizer, lda_model, dictionary, label_encoder, device)
+    
+    return predictor, config
 
 def delete_checkpoints(checkpoint_dir='.', filename_pattern='checkpoint_epoch_*.pt'):
     # If the directory is the current repo, use '.'
